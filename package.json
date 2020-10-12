@@ -17,7 +17,7 @@
     "format:js": "prettier --write .",
     "format:package.json": "prettier-package-json --write",
     "format:vala": "find src -name '*.vala' -exec uncrustify -c uncrustify.cfg --replace {} \\;",
-    "prerelease": "node scripts/build.js",
+    "prerelease": "scrivano",
     "release": "standard-version"
   },
   "devDependencies": {
@@ -25,10 +25,10 @@
     "@commitlint/config-conventional": "^11.0.0",
     "husky": "^4.3.0",
     "npm-run-all": "^4.1.5",
-    "nunjucks": "^3.2.2",
-    "prettier": "^2.1.2",
+    "prettier": "^2.2.1",
     "prettier-package-json": "^2.1.3",
-    "standard-version": "^9.0.0"
+    "scrivano": "^0.1.0",
+    "standard-version": "^9.1.0"
   },
   "husky": {
     "hooks": {
