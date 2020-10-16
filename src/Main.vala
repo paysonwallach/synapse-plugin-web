@@ -16,107 +16,101 @@
  */
 
 namespace Synapse {
+    [DBus (name = "com.paysonwallach.synapse.plugins.web.bridge")]
+    private interface WebBridgeBusIFace : Object {
+        public abstract void open_url (string url) throws DBusError, IOError;
+
+    }
+
+    private class WebBridgeProxy : Object {
+        private WebBridgeBusIFace? bus = null;
+
+        private static Once<WebBridgeProxy> instance;
+
+        public static unowned WebBridgeProxy get_default () {
+            return instance.once (() => {
+                return new WebBridgeProxy ();
+            });
+        }
+
+        construct {
+            try {
+                bus = Bus.get_proxy_sync (
+                    BusType.SESSION,
+                    "com.paysonwallach.synapse.plugins.web.bridge",
+                    "/com/paysonwallach/synapse/plugins/web/bridge"
+                    );
+            } catch (IOError err) {
+                warning (err.message);
+            }
+        }
+
+        public void open_url (string url) {
+            // var success = true;
+
+            try {
+                bus.open_url (url);
+            } catch (DBusError err) {
+                error (@"DBusError: $(err.message)");
+            } catch (IOError err) {
+                error (@"IOError: $(err.message)");
+            }
+
+            // return success;
+        }
+
+    }
+
+    private class SynapseWebMatch : ActionMatch {
+        public string url { get; construct set; }
+
+        public SynapseWebMatch (string name, string? description, string url) {
+            Object (
+                title: name,
+                description: description != null ? description : url,
+                url: url,
+                has_thumbnail: false,
+                icon_name: "firefox");
+        }
+
+        public override void do_action () {
+            WebBridgeProxy.get_default ().open_url (url);
+
+            Wnck.Screen? screen = Wnck.Screen.get_default ();
+
+            screen.force_update ();
+            screen.get_windows ().@foreach ((window) => {
+                if (window.get_state () == Wnck.WindowState.DEMANDS_ATTENTION)
+                    window.activate_transient (Gdk.x11_get_server_time (Gdk.get_default_root_window ()));
+            });
+        }
+
+    }
+
     public class WebPlugin : Object, Activatable, ItemProvider {
-        [DBus (name = "com.paysonwallach.synapse.plugins.web.bridge")]
-        public interface WebBridgeBusIFace : Object {
-            public abstract int query (string body, out UnixInputStream stream) throws DBusError, IOError;
-            public abstract void open_url (string url) throws DBusError, IOError;
+        private RelevancyService relevancy_service;
+        private Zeitgeist.Index zeitgeist_index;
 
-        }
-
-        public class WebBridgeProxy : Object {
-            private WebBridgeBusIFace? bus = null;
-
-            public signal void results_ready (UnixInputStream stream);
-
-            private static Once<WebBridgeProxy> instance;
-
-            public static unowned WebBridgeProxy get_default () {
-                return instance.once (() => {
-                    return new WebBridgeProxy ();
-                });
-            }
-
-            construct {
-                try {
-                    bus = Bus.get_proxy_sync (
-                        BusType.SESSION,
-                        "com.paysonwallach.synapse.plugins.web.bridge",
-                        "/com/paysonwallach/synapse_firefox/connector"
-                        );
-                } catch (IOError err) {
-                    warning (err.message);
-                }
-            }
-
-            public int query (string body, out UnixInputStream stream) {
-                var result = -1;
-
-                try {
-                    result = bus.query (body, out stream);
-                } catch (DBusError err) {
-                    warning (@"DBusError: $(err.message)");
-                } catch (IOError err) {
-                    warning (@"IOError: $(err.message)");
-                }
-
-                return result;
-            }
-
-            public void open_url (string url) {
-                try {
-                    bus.open_url (url);
-                } catch (DBusError err) {
-                    error (@"DBusError: $(err.message)");
-                } catch (IOError err) {
-                    error (@"IOError: $(err.message)");
-                }
-            }
-
-        }
-
-        private struct Page {
-            public string name;
-            public string? description;
-            public string url;
-
-            public Page (string name, string? description, string url) {
-                this.name = name;
-                this.description = description;
-                this.url = url;
-            }
-
-        }
-
-        private class PageMatch : ActionMatch {
-            public string url { get; construct set; }
-
-            public PageMatch (string name, string? description, string url) {
-                Object (
-                    title: name,
-                    description: description != null ? description : url,
-                    has_thumbnail: false,
-                    icon_name: "firefox",
-                    url: url);
-            }
-
-            public override void do_action () {
-                WebBridgeProxy.get_default ().open_url (url);
-
-                Wnck.Screen? screen = Wnck.Screen.get_default ();
-
-                screen.force_update ();
-                screen.get_windows ().@foreach ((window) => {
-                    if (window.get_state () == Wnck.WindowState.DEMANDS_ATTENTION)
-                        window.activate_transient (Gdk.x11_get_server_time (Gdk.get_default_root_window ()));
-                });
-            }
-
-        }
-
+        public const string UNIQUE_NAME = "org.gnome.zeitgeist.Engine";
         public bool enabled { get; set; default = true; }
 
-        public void activate () {}
+        private static GenericArray<Zeitgeist.Event> get_template () {
+            var template = new GenericArray<Zeitgeist.Event> ();
+            var event = new Zeitgeist.Event ();
+
+            event.interpretation = "http://www.zeitgeist-project.com/ontologies/2010/01/27/zg#AccessEvent";
+            event.manifestation = "http://www.zeitgeist-project.com/ontologies/2010/01/27/zg#UserActivity";
+            event.actor = "application://firefox.desktop";
+
+            template.add (event);
+
+            return template;
+        }
+
+        public void activate () {
+            relevancy_service = RelevancyService.get_default ();
+            zeitgeist_index = new Zeitgeist.Index ();
+        }
 
         public void deactivate () {}
 
@@ -124,125 +118,102 @@ namespace Synapse {
             return (QueryFlags.ACTIONS in query.query_type);
         }
 
+        private bool search_in_progress = false;
         public async ResultSet? search (Query query) throws SearchError {
-            var result_set = new ResultSet ();
-
             if (query.query_string.length < 2)
-                return result_set;
+                return null;
 
-            UnixInputStream input_stream;
+            var search_query = query.query_string.strip ();
+            var results = new ResultSet ();
 
-            WebBridgeProxy.get_default ().query (query.query_string, out input_stream);
+            while (search_in_progress) {
+                ulong sig_id;
+                sig_id = this.notify["search-in-progress"].connect (() => {
+                    if (search_in_progress)
+                        return;
+                    search.callback ();
+                });
+                yield;
 
-            var results_count = -1;
-
-            do {
-                Bytes results_count_message_length_bytes = null;
-
-                try {
-                    results_count_message_length_bytes = yield input_stream.read_bytes_async (4);
-                } catch (Error err) {
-                    warning (@"unable to read results count: $(err.message)");
-                }
-
-                var results_count_message_length = get_message_content_length (results_count_message_length_bytes);
-
-                debug (@"$results_count_message_length");
-
-                if (results_count_message_length == 0)
-                    continue;
-
-                Bytes results_count_message_bytes = null;
-
-                try {
-                    results_count_message_bytes = yield input_stream.read_bytes_async (results_count_message_length);
-                } catch (Error err) {
-                    warning (@"Error: $(err.message)");
-                }
-
-                results_count = int.parse ((string) results_count_message_bytes.get_data ());
-            } while (results_count == -1);
-
-            var parser = new Json.Parser ();
-
-            for (int i = 0 ; i < results_count ; i++) {
-                Bytes message_bytes = null;
-                Bytes message_length_bytes = null;
-
-                try {
-                    message_length_bytes = yield input_stream.read_bytes_async (4);
-                } catch (Error err) {
-                    warning (@"Error: $(err.message)");
-                }
-
-                if (message_length_bytes.get_size () == 0)
-                    continue;
-
-                var message_content_length = get_message_content_length (message_length_bytes);
-
-                if (message_content_length == 0)
-                    continue;
-
-                try {
-                    message_bytes = yield input_stream.read_bytes_async (message_content_length);
-                } catch (Error err) {
-                    warning (@"Error: $(err.message)");
-                }
-
-                try {
-                    parser.load_from_data (
-                        (string) message_bytes.get_data (),
-                        (ssize_t) message_bytes.get_size ());
-                } catch (Error err) {
-                    warning (err.message);
-                }
-
-                unowned Json.Node node = parser.get_root ();
-
-                if (node.get_node_type () != Json.NodeType.OBJECT) {
-                    warning (@"message root is of type $(node.type_name ())");
-                } else {
-                    unowned Json.Object object = node.get_object ();
-                    var title = object.get_string_member ("title");
-                    var url = object.get_string_member ("url");
-
-                    result_set.add (
-                        new PageMatch (title, null, url),
-                        (int) MatchScore.AVERAGE * ((results_count - i) / results_count));
-                }
-
+                SignalHandler.disconnect (this, sig_id);
                 query.check_cancellable ();
             }
 
-            return result_set;
+            try {
+                string[] words = Regex.split_simple ("\\s+|\\.+(?!\\d)", search_query);
+                search_query = "(%s*)".printf (string.joinv ("* ", words));
+
+                debug (@"searching for $search_query...");
+                var zeitgeist_results = yield zeitgeist_index.search (
+                    search_query,
+                    new Zeitgeist.TimeRange (int64.MIN, int64.MAX),
+                    get_template (),
+                    0,
+                    query.max_results,
+                    Zeitgeist.ResultType.MOST_RECENT_SUBJECTS,
+                    null);
+
+                debug (@"number of results found: $(zeitgeist_results.estimated_matches ())");
+                foreach (var event in zeitgeist_results) {
+                    query.check_cancellable ();
+
+                    if (event.num_subjects () <= 0)
+                        continue;
+
+                    var subject = event.get_subject (0);
+
+                    if (subject.text == null)
+                        continue;
+
+                    if (subject.uri.split ("://")[0] == "file")
+                        continue;
+
+                    results.add (
+                        new SynapseWebMatch (subject.text, null, subject.uri),
+                        RelevancyService.compute_relevancy (
+                            MatchScore.AVERAGE,
+                            relevancy_service.get_uri_popularity (subject.uri)));
+                }
+            } catch (Error error) {
+                if (!query.is_cancelled ())
+                    warning (@"Zeitgeist search failed: $(error.message)");
+            }
+
+            search_in_progress = false;
+
+            query.check_cancellable ();
+
+            return results;
         }
-
-        private size_t get_message_content_length (Bytes message_length_bytes) {
-            size_t message_content_length = 0;
-            uint8[] message_length_buffer = message_length_bytes.get_data ();
-
-            if (message_length_bytes.get_size () == 4)
-                message_content_length = (
-                    (message_length_buffer[3] << 24)
-                    + (message_length_buffer[2] << 16)
-                    + (message_length_buffer[1] << 8)
-                    + (message_length_buffer[0])
-                    );
-
-            return message_content_length;
-        }
-
     }
 }
 
-Synapse.PluginInfo register_plugin () {
-    return new Synapse.PluginInfo (
-        typeof (Synapse.WebPlugin),
-        "Firefox",
-        "Search your bookmarks and browser history.",
-        "firefox",
-        null,
-        Environment.find_program_in_path ("firefox") != null,
-        "Firefox is not installed."
-        );
+public Synapse.PluginInfo register_plugin () {
+    Synapse.PluginInfo plugin_info = null;
+    var dbus_service = Synapse.DBusService.get_default ();
+    var icon_name = "applications-internet";
+    var loop = new MainLoop ();
+
+    dbus_service.name_is_activatable_async.begin (
+                Synapse.WebPlugin.UNIQUE_NAME, (obj, res) => {
+        var activatable = dbus_service.name_is_activatable_async.end (res);
+        var default_browser = AppInfo.get_default_for_type ("text/html", true);
+
+        if (default_browser != null)
+            icon_name = default_browser.get_icon ().to_string ();
+
+        plugin_info = new Synapse.PluginInfo (
+            typeof (Synapse.WebPlugin),
+            "Web",
+            "Search web browser history.",
+            icon_name,
+            null,
+            activatable,
+            "Zeitgeist is not installed");
+
+        loop.quit ();
+    });
+    loop.run ();
+
+    return plugin_info;
 }
