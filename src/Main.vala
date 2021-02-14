@@ -81,7 +81,12 @@ namespace Synapse {
             screen.force_update ();
             screen.get_windows ().@foreach ((window) => {
                 if (window.get_state () == Wnck.WindowState.DEMANDS_ATTENTION)
-                    window.activate_transient (Gdk.x11_get_server_time (Gdk.get_default_root_window ()));
+                    window.activate_transient (
+                        Gdk.X11.get_server_time (
+                            Gdk.X11.Window.lookup_for_display (
+                                Gdk.X11.Display.lookup_for_xdisplay (
+                                    Gdk.X11.get_default_xdisplay ()),
+                                Gdk.X11.get_default_root_xwindow ())));
             });
         }
 
