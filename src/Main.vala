@@ -38,8 +38,7 @@ namespace Synapse {
                 bus = Bus.get_proxy_sync (
                     BusType.SESSION,
                     "com.paysonwallach.synapse.plugins.web.bridge",
-                    "/com/paysonwallach/synapse/plugins/web/bridge"
-                    );
+                    "/com/paysonwallach/synapse/plugins/web/bridge");
             } catch (IOError err) {
                 warning (err.message);
             }
