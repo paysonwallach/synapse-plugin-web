@@ -85,8 +85,6 @@ namespace Synapse {
         }
 
         public void open_url (string url) {
-            // var success = true;
-
             try {
                 bus.open_url (url);
             } catch (DBusError err) {
@@ -94,8 +92,6 @@ namespace Synapse {
             } catch (IOError err) {
                 error (@"IOError: $(err.message)");
             }
-
-            // return success;
         }
 
     }
@@ -176,14 +172,13 @@ namespace Synapse {
                 search_query = "(%s*)".printf (string.joinv ("* ", words));
 
                 debug (@"searching for $search_query...");
-                var zeitgeist_results = yield zeitgeist_index.search (
-                    search_query,
-                    new Zeitgeist.TimeRange (int64.MIN, int64.MAX),
-                    get_template (),
-                    0,
-                    query.max_results,
-                    Zeitgeist.ResultType.MOST_RECENT_SUBJECTS,
-                    null);
+                var zeitgeist_results = yield zeitgeist_index.search (search_query,
+                                                                      new Zeitgeist.TimeRange (int64.MIN, int64.MAX),
+                                                                      get_template (),
+                                                                      0,
+                                                                      query.max_results,
+                                                                      Zeitgeist.ResultType.MOST_RECENT_SUBJECTS,
+                                                                      null);
 
                 debug (@"number of results found: $(zeitgeist_results.estimated_matches ())");
                 foreach (var event in zeitgeist_results) {
@@ -227,7 +222,7 @@ public Synapse.PluginInfo register_plugin () {
     var loop = new MainLoop ();
 
     dbus_service.name_is_activatable_async.begin (
-                Synapse.WebPlugin.UNIQUE_NAME, (obj, res) => {
+            Synapse.WebPlugin.UNIQUE_NAME, (obj, res) => {
         var activatable = dbus_service.name_is_activatable_async.end (res);
         var default_browser = AppInfo.get_default_for_type ("text/html", true);
 
