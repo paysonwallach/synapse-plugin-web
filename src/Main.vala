@@ -16,6 +16,46 @@
  */
 
 namespace Synapse {
+    [DBus (name = "com.paysonwallach.attention")]
+    private interface WindowManagerBuseIFace : Object {
+        public abstract void activate_window_demanding_attention () throws DBusError, IOError;
+
+    }
+
+    private class WindowManagerProxy : Object {
+        private WindowManagerBuseIFace? bus = null;
+
+        private static Once<WindowManagerProxy> instance;
+
+        public static unowned WindowManagerProxy get_default () {
+            return instance.once (() => {
+                return new WindowManagerProxy ();
+            });
+        }
+
+        construct {
+            try {
+                bus = Bus.get_proxy_sync (
+                    BusType.SESSION,
+                    "com.paysonwallach.attention",
+                    "/com/paysonwallach/attention");
+            } catch (IOError err) {
+                warning (err.message);
+            }
+        }
+
+        public void activate_window_demanding_attention () {
+            try {
+                bus.activate_window_demanding_attention ();
+            } catch (DBusError err) {
+                error (@"DBusError: $(err.message)");
+            } catch (IOError err) {
+                error (@"IOError: $(err.message)");
+            }
+        }
+
+    }
+
     [DBus (name = "com.paysonwallach.synapse.plugins.web.bridge")]
     private interface WebBridgeBusIFace : Object {
         public abstract void open_url (string url) throws DBusError, IOError;
@@ -74,19 +114,7 @@ namespace Synapse {
 
         public override void do_action () {
             WebBridgeProxy.get_default ().open_url (url);
-
-            Wnck.Screen? screen = Wnck.Screen.get_default ();
-
-            screen.force_update ();
-            screen.get_windows ().@foreach ((window) => {
-                if (window.get_state () == Wnck.WindowState.DEMANDS_ATTENTION)
-                    window.activate_transient (
-                        Gdk.X11.get_server_time (
-                            Gdk.X11.Window.lookup_for_display (
-                                Gdk.X11.Display.lookup_for_xdisplay (
-                                    Gdk.X11.get_default_xdisplay ()),
-                                Gdk.X11.get_default_root_xwindow ())));
-            });
+            WindowManagerProxy.get_default ().activate_window_demanding_attention ();
         }
 
     }
