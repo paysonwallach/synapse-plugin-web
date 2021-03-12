@@ -23,8 +23,6 @@ namespace Synapse {
     }
 
     private class WindowManagerProxy : Object {
-        private WindowManagerBuseIFace? bus = null;
-
         private static Once<WindowManagerProxy> instance;
 
         public static unowned WindowManagerProxy get_default () {
@@ -35,10 +33,6 @@ namespace Synapse {
 
         construct {
             try {
-                bus = Bus.get_proxy_sync (
-                    BusType.SESSION,
-                    "com.paysonwallach.attention",
-                    "/com/paysonwallach/attention");
             } catch (IOError err) {
                 warning (err.message);
             }
@@ -46,7 +40,12 @@ namespace Synapse {
 
         public void activate_window_demanding_attention () {
             try {
-                bus.activate_window_demanding_attention ();
+                WindowManagerBuseIFace? window_manager = Bus.get_proxy_sync (
+                    BusType.SESSION,
+                    "com.paysonwallach.attention",
+                    "/com/paysonwallach/attention");
+
+                window_manager.activate_window_demanding_attention ();
             } catch (DBusError err) {
                 error (@"DBusError: $(err.message)");
             } catch (IOError err) {
@@ -63,7 +62,7 @@ namespace Synapse {
     }
 
     private class WebBridgeProxy : Object {
-        private WebBridgeBusIFace? bus = null;
+        private uint watch_id = 0U;
 
         private static Once<WebBridgeProxy> instance;
 
@@ -73,25 +72,54 @@ namespace Synapse {
             });
         }
 
-        construct {
+        public void open_url (string url) {
             try {
-                bus = Bus.get_proxy_sync (
-                    BusType.SESSION,
-                    "com.paysonwallach.synapse.plugins.web.bridge",
-                    "/com/paysonwallach/synapse/plugins/web/bridge");
+                request_proxy_open (url);
+            } catch (DBusError err) {
+                if (err.code == DBusError.SERVICE_UNKNOWN) {
+                    request_browser_launch (url);
+                } else {
+                    warning (@"DBusError: $(err.message)");
+                }
             } catch (IOError err) {
-                warning (err.message);
+                warning (@"IOError: $(err.message)");
             }
         }
 
-        public void open_url (string url) {
+        private void request_proxy_open (string url) throws DBusError, IOError {
+            WebBridgeBusIFace? proxy = Bus.get_proxy_sync (
+                BusType.SESSION,
+                "com.paysonwallach.synapse.plugins.web.bridge",
+                "/com/paysonwallach/synapse/plugins/web/bridge");
+
+            proxy.open_url (url);
+        }
+
+        private void request_browser_launch (string url) {
+            var app_info = AppInfo.get_default_for_type ("text/html", false);
+            if (app_info == null)
+                return;
+
             try {
-                bus.open_url (url);
-            } catch (DBusError err) {
-                error (@"DBusError: $(err.message)");
-            } catch (IOError err) {
-                error (@"IOError: $(err.message)");
+                app_info.launch_uris (null, null);
+                watch_id = Bus.watch_name (
+                    BusType.SESSION,
+                    "com.paysonwallach.amber.bridge", BusNameWatcherFlags.NONE,
+                    () => on_name_acquired (url));
+            } catch (Error err) {
+                warning (@"unable to get default type: $(err.message)");
             }
+        }
+
+        private void on_name_acquired (string url) {
+            try {
+                request_proxy_open (url);
+            } catch (Error err) {
+                warning (@"error: $(err.message)");
+            }
+
+            if (watch_id != 0U)
+                Bus.unwatch_name (watch_id);
         }
 
     }
