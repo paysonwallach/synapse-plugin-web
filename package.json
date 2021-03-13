@@ -1,4 +1,5 @@
 {
+  "private": true,
   "name": "synapse-plugin-web",
   "description": "A plugin to provide browser support to Synapse.",
   "license": "GPL-3.0",
