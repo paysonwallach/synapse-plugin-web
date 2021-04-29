@@ -29,7 +29,14 @@ wnck_dep = dependency('libwnck-3.0')
 zeitgeist_dep = dependency('zeitgeist-2.0')
 
 plugins_dir = synapse_dep.get_pkgconfig_variable(
-  'pluginsdir', define_variable: ['libdir', lib_dir])
+  'pluginsdir', define_variable: ['libdir', lib_dir]
+)
+
+add_project_arguments([
+    '-DG_LOG_DOMAIN="@0@"'.format(meson.project_name())
+  ],
+  language:'c'
+)
 
 shared_library(
   'webplugin',
